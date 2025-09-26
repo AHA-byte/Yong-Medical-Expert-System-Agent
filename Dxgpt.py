@@ -4,8 +4,10 @@ import uuid
 import requests
 from typing import Dict, List, Any
 
-DXGPT_SUBSCRIPTION_KEY = os.getenv("DXGPT_SUBSCRIPTION_KEY", "9355686c43054f48a29e72ec469792e9")
-DXGPT_BASE_URL = "https://dxgpt-apim.azure-api.net/api"
+from dotenv import load_dotenv
+load_dotenv()
+DXGPT_SUBSCRIPTION_KEY = os.getenv("DXGPT_SUBSCRIPTION_KEY")
+DXGPT_BASE_URL = os.getenv("DXGPT_BASE_URL")
 
 SYSTEM_PROMPT = """You are a cautious clinical triage assistant.
 You must NOT provide a medical diagnosis.
@@ -52,6 +54,7 @@ def call_dxgpt_diagnose(description: str) -> Any:
         "Content-Type": "application/json",
         "Ocp-Apim-Subscription-Key": DXGPT_SUBSCRIPTION_KEY
     }
+
     payload = {
         "description": description,
         "myuuid": str(uuid.uuid4()),

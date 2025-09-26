@@ -7,8 +7,10 @@ from typing import Dict, List, Any, Tuple
 import streamlit as st
 
 #Config 
-DXGPT_SUBSCRIPTION_KEY = os.getenv("DXGPT_SUBSCRIPTION_KEY", "9355686c43054f48a29e72ec469792e9")
-DXGPT_BASE_URL = "https://dxgpt-apim.azure-api.net/api"
+from dotenv import load_dotenv
+load_dotenv()
+DXGPT_SUBSCRIPTION_KEY = os.getenv("DXGPT_SUBSCRIPTION_KEY")
+DXGPT_BASE_URL = os.getenv("DXGPT_BASE_URL")
 
 SYSTEM_PROMPT = """You are a cautious clinical triage assistant.
 You must NOT provide a medical diagnosis.
