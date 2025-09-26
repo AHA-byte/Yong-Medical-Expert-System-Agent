@@ -28,19 +28,19 @@ This project is a medical expert system agent designed to provide differential d
    ```
 
 ## Usage
-Run the main script to get differential diagnoses:
+Run the main script for DXGPT-based diagnosis:
 ```powershell
-python Dxgpt.py
+python DxGPT_Medical_Expert_System.py
 ```
-Or use `test.py` for OpenAI-based diagnosis:
+Or use `OpenAI_Medical_Expert_System.py` for OpenAI-based diagnosis:
 ```powershell
-python test.py
+python OpenAI_Medical_Expert_System.py
 ```
 
 ## Files
-- `Dxgpt.py` / `DxGPT2.py`: Main diagnosis logic using DXGPT API
-- `test.py`: Example usage with OpenAI API
-- `.env`: Environment variables for API keys
+* `Dxgpt.py` / `DxGPT_Medical_Expert_System.py`: Main diagnosis logic using DXGPT API
+* `OpenAI_Medical_Expert_System.py`: Example usage with OpenAI API
+* `.env`: Environment variables for API keys
 
 ## Security
 - **Never commit your `.env` file with real API keys to Git!**
