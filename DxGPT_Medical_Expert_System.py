@@ -101,7 +101,8 @@ def _build_context_section(
     allergies: str,
     smoking: str,
     travel: str,
-    pregnancy: str
+    pregnancy: str,
+    noticed: str = ""
 ) -> str:
     fields = []
     if age_group:  fields.append(f"Age group: {age_group}")
@@ -115,6 +116,8 @@ def _build_context_section(
     if smoking:    fields.append(f"Smoking status: {smoking}")
     if travel:     fields.append(f"Recent travel or exposure: {travel}")
     if pregnancy:  fields.append(f"Pregnancy status: {pregnancy}")
+    if noticed and noticed.strip():
+        fields.append(f"Symptoms first noticed: {noticed.strip()}")
     return " ".join(fields)
 
 def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str) -> dict:
@@ -178,8 +181,13 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str) -> dic
 
 st.set_page_config(page_title="DxGPT Triage (Differentials)", page_icon="🩺", layout="centered")
 
-st.title("🩺 Differential Helper Carol Yong(DxGPT)")
-st.caption("For educational triage support only. Not a medical tool. No diagnosis is provided.")
+st.title("🩺 Yong Differential Helper")
+st.caption("For educational triage support only. Not a medical tool. Consult Doctor for critical conditions.")
+
+symptoms_csv = st.text_area(
+    "Enter 4 to 10 symptoms (comma separated), Please give Optional Clinical Context below to improve results.",
+    placeholder="e.g., persistent cough, chest pain, shortness of breath, fatigue"
+)
 
 with st.expander("Optional clinical context"):
     col1, col2 = st.columns(2)
@@ -189,18 +197,15 @@ with st.expander("Optional clinical context"):
         duration = st.text_input("Symptom duration (e.g., 3 days, 2 weeks)")
         onset = st.selectbox("Onset", ["", "Sudden", "Gradual"])
         fever = st.selectbox("Fever", ["", "Yes", "No", "Unknown"])
+        pregnancy = st.selectbox("Pregnancy status", ["", "Pregnant", "Not pregnant", "Unknown"])
     with col2:
         comorbid = st.text_input("Previous illnesses or comorbidities")
         meds = st.text_input("Current medications")
         allergies = st.text_input("Allergies")
         smoking = st.selectbox("Smoking status", ["", "Never", "Former", "Current"])
         travel = st.text_input("Recent travel or exposure")
-    pregnancy = st.selectbox("Pregnancy status", ["", "Pregnant", "Not pregnant", "Unknown"])
-
-symptoms_csv = st.text_area(
-    "Enter 4 to 10 symptoms (comma separated)",
-    placeholder="e.g., persistent cough, chest pain, shortness of breath, fatigue"
-)
+        noticed = st.text_input("When did you notice symptoms")
+    
 
 left, right = st.columns([1,1])
 with left:
@@ -214,7 +219,7 @@ if run_btn:
     else:
         try:
             context = _build_context_section(
-                age_group, sex, duration, onset, fever, comorbid, meds, allergies, smoking, travel, pregnancy
+                age_group, sex, duration, onset, fever, comorbid, meds, allergies, smoking, travel, pregnancy, noticed
             )
             with st.spinner("Querying DxGPT..."):
                 result = get_top3_differentials_with_mismatch(symptoms_csv, context)
