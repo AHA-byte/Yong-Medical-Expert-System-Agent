@@ -120,10 +120,16 @@ def _build_context_section(
         fields.append(f"Symptoms first noticed: {noticed.strip()}")
     return " ".join(fields)
 
-def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str) -> dict:
+def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, optional_note: str = "") -> dict:
     symptoms_list = _normalize_symptom_list(symptoms_csv)
     base = f"Adult patient with the following symptoms: {', '.join(symptoms_list)}."
-    description = f"{base} {context}".strip()
+    # keep context separate from the optional note
+    desc_parts = [base]
+    if context.strip():
+        desc_parts.append(context.strip())
+    if optional_note.strip():
+        desc_parts.append(f"Additional patient note: {optional_note.strip()}")
+    description = " ".join(desc_parts)
 
     dxgpt = call_dxgpt_diagnose(description)
     items = _extract_items(dxgpt)
@@ -141,15 +147,12 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str) -> dic
         }
 
     probs = _heuristic_probabilities(top, symptoms_list)
-
     diagnoses_fmt = []
     for it, p in zip(top, probs):
         name = it.get("diagnosis") or it.get("name") or it.get("disease") or "Unspecified"
         matches = (it.get("symptoms_in_common") or it.get("matching_symptoms") or []) or []
         mismatches = (it.get("symptoms_not_in_common") or it.get("non_matching_symptoms") or []) or []
 
-        # Fallback if API did not give mismatches: compute "not typical"
-        # as user-entered symptoms minus "matches" set
         user_set = set([s.lower() for s in symptoms_list])
         match_set = set([m.lower() for m in matches])
         not_typical = mismatches if mismatches else sorted([s for s in symptoms_list if s.lower() not in match_set])
@@ -177,11 +180,15 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str) -> dic
         "disclaimer": "This is not medical advice. Seek professional evaluation."
     }
 
+#prepares the prompt, calls the API, processes the response, and formats the output for the UI
 # Streamlit Part
+
 
 st.set_page_config(page_title="DxGPT Triage (Differentials)", page_icon="🩺", layout="centered")
 
+
 st.title("🩺 Yong Differential Helper")
+
 st.caption("For educational triage support only. Not a medical tool. Consult Doctor for critical conditions.")
 
 symptoms_csv = st.text_area(
@@ -189,7 +196,7 @@ symptoms_csv = st.text_area(
     placeholder="e.g., persistent cough, chest pain, shortness of breath, fatigue"
 )
 
-with st.expander("Optional clinical context"):
+with st.expander("Optional clinical context(CLick to Expand)"):
     col1, col2 = st.columns(2)
     with col1:
         age_group = st.selectbox("Age group", ["", "Infant", "Child", "Adolescent", "Adult", "Older adult"], index=4)
@@ -205,11 +212,20 @@ with st.expander("Optional clinical context"):
         smoking = st.selectbox("Smoking status", ["", "Never", "Former", "Current"])
         travel = st.text_input("Recent travel or exposure")
         noticed = st.text_input("When did you notice symptoms")
-    
+
+# NEW: small optional message box, not part of the clinical context
+
+optional_note = st.text_input(
+    "Optional Note",
+    placeholder="e.g., Already saw a doctor yesterday, suspected common cold.",
+    key="optional_note",
+    help="Anything you want the model to know that isn't clinical context (opinions received, prior visits, preferences, etc.)."
+)
+
 
 left, right = st.columns([1,1])
 with left:
-    run_btn = st.button("Give me diagnosis right away")
+    run_btn = st.button("Give me diagnosis right away!")
 with right:
     st.write("")
 
@@ -221,8 +237,11 @@ if run_btn:
             context = _build_context_section(
                 age_group, sex, duration, onset, fever, comorbid, meds, allergies, smoking, travel, pregnancy, noticed
             )
+
             with st.spinner("Querying DxGPT..."):
-                result = get_top3_differentials_with_mismatch(symptoms_csv, context)
+                #st.image("https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif", caption="AI is thinking...", use_container_width=True)
+                result = get_top3_differentials_with_mismatch(symptoms_csv, context, optional_note)
+
 
             diags = result.get("diagnoses", [])
             if not diags:
@@ -268,4 +287,6 @@ if run_btn:
             st.stop()
 
 # Footer note
-st.caption("DXGPT key is read from the DXGPT_SUBSCRIPTION_KEY environment variable. This tool does not provide medical advice.")
+st.caption("This tool is not a substitute for a real Doctor.")
+#st.image("https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", caption="Stay healthy!", use_container_width=True)
+#st.markdown("the above image wont be in final product, Compliments from Ludiac")
