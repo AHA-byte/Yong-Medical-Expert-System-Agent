@@ -188,7 +188,20 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
 # Streamlit Part
 
 
-st.set_page_config(page_title="DxGPT Triage (Differentials)", page_icon="🩺", layout="centered")
+
+st.set_page_config(page_title="Yong Differential Helper", page_icon="🩺", layout="centered")
+# Inject Bahnschrift Condensed font for the whole page
+st.markdown(
+    """
+    <link href="https://fonts.googleapis.com/css?family=Oswald:400,700&display=swap" rel="stylesheet">
+    <style>
+    html, body, [class^='css'] {
+        font-family: 'Oswald', 'Bahnschrift Condensed', 'Bahnschrift', Arial, sans-serif !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 
 st.title("🩺 Yong Differential Helper")
