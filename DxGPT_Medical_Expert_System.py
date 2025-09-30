@@ -138,6 +138,7 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
         msg = dxgpt.get("message") or dxgpt.get("error") or "Unknown error"
         raise RuntimeError(f"DXGPT returned non-success: {msg}")
 
+    # Only keep diagnoses with probability > 0, up to 3
     top = items[:3] if len(items) >= 3 else items
     if not top:
         return {
@@ -149,28 +150,31 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
     probs = _heuristic_probabilities(top, symptoms_list)
     diagnoses_fmt = []
     for it, p in zip(top, probs):
-        name = it.get("diagnosis") or it.get("name") or it.get("disease") or "Unspecified"
-        matches = (it.get("symptoms_in_common") or it.get("matching_symptoms") or []) or []
-        mismatches = (it.get("symptoms_not_in_common") or it.get("non_matching_symptoms") or []) or []
+        if p > 0:
+            name = it.get("diagnosis") or it.get("name") or it.get("disease") or "Unspecified"
+            matches = (it.get("symptoms_in_common") or it.get("matching_symptoms") or []) or []
+            mismatches = (it.get("symptoms_not_in_common") or it.get("non_matching_symptoms") or []) or []
 
-        user_set = set([s.lower() for s in symptoms_list])
-        match_set = set([m.lower() for m in matches])
-        not_typical = mismatches if mismatches else sorted([s for s in symptoms_list if s.lower() not in match_set])
+            user_set = set([s.lower() for s in symptoms_list])
+            match_set = set([m.lower() for m in matches])
+            not_typical = mismatches if mismatches else sorted([s for s in symptoms_list if s.lower() not in match_set])
 
-        rationale_bits = []
-        if matches:
-            rationale_bits.append(f"matches: {', '.join(matches[:3])}")
-        if not_typical:
-            rationale_bits.append(f"not typical: {', '.join(not_typical[:2])}")
-        rationale = "; ".join(rationale_bits) or "Pattern partially overlaps the provided symptoms."
+            rationale_bits = []
+            if matches:
+                rationale_bits.append(f"matches: {', '.join(matches[:3])}")
+            if not_typical:
+                rationale_bits.append(f"not typical: {', '.join(not_typical[:2])}")
+            rationale = "; ".join(rationale_bits) or "Pattern partially overlaps the provided symptoms."
 
-        diagnoses_fmt.append({
-            "name": name,
-            "probability_percent": float(p),
-            "rationale": rationale,
-            "matching_symptoms": matches,
-            "not_typical_symptoms": not_typical
-        })
+            diagnoses_fmt.append({
+                "name": name,
+                "probability_percent": float(p),
+                "rationale": rationale,
+                "matching_symptoms": matches,
+                "not_typical_symptoms": not_typical
+            })
+    # Only keep up to 3 diagnoses with >0 probability
+    diagnoses_fmt = diagnoses_fmt[:3]
 
     red_flags = "Seek urgent care for severe chest pain, confusion, unilateral weakness, severe shortness of breath, or rapid deterioration."
 
@@ -239,7 +243,7 @@ if run_btn:
             )
 
             with st.spinner("Querying DxGPT..."):
-                #st.image("https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif", caption="AI is thinking...", use_container_width=True)
+                #st.image("https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif", caption="AI is thinking...", width='stretch')
                 result = get_top3_differentials_with_mismatch(symptoms_csv, context, optional_note)
 
 
@@ -257,7 +261,7 @@ if run_btn:
                     }
                     for d in diags
                 ]
-                st.dataframe(rows, use_container_width=True)
+                st.dataframe(rows, width='stretch')
 
                 # Details per diagnosis
                 for i, d in enumerate(diags, start=1):
@@ -288,5 +292,5 @@ if run_btn:
 
 # Footer note
 st.caption("This tool is not a substitute for a real Doctor.")
-#st.image("https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", caption="Stay healthy!", use_container_width=True)
+#st.image("https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", caption="Stay healthy!", width='stretch')
 #st.markdown("the above image wont be in final product, Compliments from Ludiac")
