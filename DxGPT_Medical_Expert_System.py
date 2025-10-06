@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import uuid
 import requests
@@ -6,11 +7,11 @@ from typing import Dict, List, Any, Tuple
 
 import streamlit as st
 
-#Config 
+# --- Config ---
 from dotenv import load_dotenv
 load_dotenv()
 DXGPT_SUBSCRIPTION_KEY = os.getenv("DXGPT_SUBSCRIPTION_KEY")
-DXGPT_BASE_URL = os.getenv("DXGPT_BASE_URL")
+DXGPT_BASE_URL = (os.getenv("DXGPT_BASE_URL") or "https://dxgpt-apim.azure-api.net/api").rstrip("/")
 
 SYSTEM_PROMPT = """You are a cautious clinical triage assistant.
 You must NOT provide a medical diagnosis.
@@ -32,7 +33,83 @@ Output JSON ONLY with this schema:
   "disclaimer": "This is not medical advice. Seek professional evaluation."
 }
 """
-#Logic
+
+# --- Helpers for normalization / cleaning ---
+
+_PUNCT_RE = re.compile(r"[,\.\(\)\[\]\{\};:!?\-_/]+")
+
+def _norm(s: str) -> str:
+    """Lowercase, strip punctuation, collapse whitespace (for robust comparisons)."""
+    s = (s or "").strip().lower()
+    s = _PUNCT_RE.sub(" ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+def _normalize_symptom_list(symptoms_text: str) -> List[str]:
+    """
+    Prefer semicolons or newlines as separators; keep commas inside a symptom.
+    If the user only uses commas, fall back to comma-split but keep long adjectival phrases intact.
+    """
+    text = (symptoms_text or "").strip()
+    if not text:
+        return []
+
+    if ("\n" in text) or (";" in text):
+        parts = [p.strip() for p in re.split(r"[;\n]+", text) if p.strip()]
+    else:
+        # Fall back to comma-split; if it looks like one descriptive phrase, keep it as one.
+        comma_parts = [p.strip() for p in text.split(",") if p.strip()]
+        if len(comma_parts) >= 3 and sum(len(p) <= 5 for p in comma_parts) >= 2:
+            parts = [" ".join(comma_parts)]
+        else:
+            parts = comma_parts
+
+    # de-duplicate (case/punct insensitive) while preserving original phrasing
+    seen, out = set(), []
+    for p in parts:
+        k = _norm(p)
+        if k and k not in seen:
+            seen.add(k)
+            out.append(p)
+    return out
+
+def _clean_overlap(matches: List[str], mismatches: List[str], user_symptoms: List[str]) -> Tuple[List[str], List[str]]:
+    """
+    - Deduplicate matches/mismatches (case/punct insensitive).
+    - Remove any mismatch that equals/contains/is contained by any match.
+    - If API provided no mismatches, compute them from user symptoms, then apply the same filter.
+    """
+    # Dedup matches
+    m_seen, m_dedup = set(), []
+    for m in (matches or []):
+        n = _norm(m)
+        if n and n not in m_seen:
+            m_seen.add(n)
+            m_dedup.append(m)
+
+    # Base mismatches: API list or user symptoms not listed as matches
+    if mismatches:
+        raw_mm = mismatches
+    else:
+        m_norms = set(_norm(x) for x in m_dedup)
+        raw_mm = [s for s in (user_symptoms or []) if _norm(s) not in m_norms]
+
+    # Remove any mismatch overlapping with a match (identical, substring, superstring)
+    m_norm_list = [_norm(x) for x in m_dedup]
+    mm_seen, mm_clean = set(), []
+    for nt in raw_mm:
+        ntn = _norm(nt)
+        if not ntn or ntn in mm_seen:
+            continue
+        overlaps = any(ntn in mn or mn in ntn for mn in m_norm_list)
+        if not overlaps:
+            mm_seen.add(ntn)
+            mm_clean.append(nt)
+
+    return m_dedup, mm_clean
+
+# --- Logic ---
+
 def _heuristic_probabilities(items: List[Dict], original_symptoms: List[str]) -> List[float]:
     scores = []
     for it in items:
@@ -74,7 +151,6 @@ def call_dxgpt_diagnose(description: str) -> Any:
 def _extract_items(dxgpt: Any) -> List[Dict]:
     if isinstance(dxgpt, list):
         return dxgpt
-
     if isinstance(dxgpt, dict):
         data = dxgpt.get("data")
         if isinstance(data, dict) and isinstance(data.get("data"), list):
@@ -86,9 +162,6 @@ def _extract_items(dxgpt: Any) -> List[Dict]:
         if any(k in dxgpt for k in ("diagnosis", "name", "disease")):
             return [dxgpt]
     return []
-
-def _normalize_symptom_list(symptoms_csv: str) -> List[str]:
-    return [s.strip() for s in symptoms_csv.split(",") if s.strip()]
 
 def _build_context_section(
     age_group: str,
@@ -121,9 +194,8 @@ def _build_context_section(
     return " ".join(fields)
 
 def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, optional_note: str = "") -> dict:
-    symptoms_list = _normalize_symptom_list(symptoms_csv)
-    base = f"Adult patient with the following symptoms: {', '.join(symptoms_list)}."
-    # keep context separate from the optional note
+    user_symptoms = _normalize_symptom_list(symptoms_csv)
+    base = f"Adult patient with the following symptoms: {', '.join(user_symptoms) if user_symptoms else symptoms_csv.strip()}."
     desc_parts = [base]
     if context.strip():
         desc_parts.append(context.strip())
@@ -138,7 +210,6 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
         msg = dxgpt.get("message") or dxgpt.get("error") or "Unknown error"
         raise RuntimeError(f"DXGPT returned non-success: {msg}")
 
-    # Only keep diagnoses with probability > 0, up to 3
     top = items[:3] if len(items) >= 3 else items
     if not top:
         return {
@@ -147,17 +218,16 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
             "disclaimer": "This is not medical advice. Seek professional evaluation."
         }
 
-    probs = _heuristic_probabilities(top, symptoms_list)
+    probs = _heuristic_probabilities(top, user_symptoms)
     diagnoses_fmt = []
     for it, p in zip(top, probs):
         if p > 0:
             name = it.get("diagnosis") or it.get("name") or it.get("disease") or "Unspecified"
-            matches = (it.get("symptoms_in_common") or it.get("matching_symptoms") or []) or []
-            mismatches = (it.get("symptoms_not_in_common") or it.get("non_matching_symptoms") or []) or []
+            api_matches = (it.get("symptoms_in_common") or it.get("matching_symptoms") or []) or []
+            api_mismatches = (it.get("symptoms_not_in_common") or it.get("non_matching_symptoms") or []) or []
 
-            user_set = set([s.lower() for s in symptoms_list])
-            match_set = set([m.lower() for m in matches])
-            not_typical = mismatches if mismatches else sorted([s for s in symptoms_list if s.lower() not in match_set])
+            # NEW: strong overlap cleaning
+            matches, not_typical = _clean_overlap(api_matches, api_mismatches, user_symptoms)
 
             rationale_bits = []
             if matches:
@@ -173,7 +243,7 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
                 "matching_symptoms": matches,
                 "not_typical_symptoms": not_typical
             })
-    # Only keep up to 3 diagnoses with >0 probability
+
     diagnoses_fmt = diagnoses_fmt[:3]
 
     red_flags = "Seek urgent care for severe chest pain, confusion, unilateral weakness, severe shortness of breath, or rapid deterioration."
@@ -184,36 +254,18 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
         "disclaimer": "This is not medical advice. Seek professional evaluation."
     }
 
-#prepares the prompt, calls the API, processes the response, and formats the output for the UI
-# Streamlit Part
+# --- Streamlit UI ---
 
-
-
-st.set_page_config(page_title="Yong Differential Helper", page_icon="🩺", layout="centered")
-# Inject Bahnschrift Condensed font for the whole page
-st.markdown(
-    """
-    <link href="https://fonts.googleapis.com/css?family=Oswald:400,700&display=swap" rel="stylesheet">
-    <style>
-    html, body, [class^='css'] {
-        font-family: 'Oswald', 'Bahnschrift Condensed', 'Bahnschrift', Arial, sans-serif !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-
-st.title("🩺 Yong Differential Helper")
-
-st.caption("For educational triage support only. Not a medical tool. Consult Doctor for critical conditions.")
+st.set_page_config(page_title="Yong Differential Helper (Minimal)", page_icon="🩺", layout="centered")
+st.title("🩺 Yong Differential Helper (Minimal)")
+st.caption("For educational triage support only. Not medical advice.")
 
 symptoms_csv = st.text_area(
-    "Enter 4 to 10 symptoms (comma separated), Please give Optional Clinical Context below to improve results.",
-    placeholder="e.g., persistent cough, chest pain, shortness of breath, fatigue"
+    "Enter 4–10 symptoms (use semicolons or new lines to separate; commas can be part of a symptom).",
+    placeholder="e.g., dark velvety skin in body folds; weight gain; skin tags"
 )
 
-with st.expander("Optional clinical context(CLick to Expand)"):
+with st.expander("Optional clinical context (click to expand)"):
     col1, col2 = st.columns(2)
     with col1:
         age_group = st.selectbox("Age group", ["", "Infant", "Child", "Adolescent", "Adult", "Older adult"], index=4)
@@ -230,41 +282,33 @@ with st.expander("Optional clinical context(CLick to Expand)"):
         travel = st.text_input("Recent travel or exposure")
         noticed = st.text_input("When did you notice symptoms")
 
-# NEW: small optional message box, not part of the clinical context
-
 optional_note = st.text_input(
     "Optional Note",
     placeholder="e.g., Already saw a doctor yesterday, suspected common cold.",
     key="optional_note",
-    help="Anything you want the model to know that isn't clinical context (opinions received, prior visits, preferences, etc.)."
 )
 
-
-left, right = st.columns([1,1])
+left, right = st.columns([1, 1])
 with left:
-    run_btn = st.button("Give me diagnosis right away!")
+    run_btn = st.button("Give me differential")
 with right:
     st.write("")
 
 if run_btn:
     if not symptoms_csv.strip():
-        st.error("Please enter at least a few comma separated symptoms.")
+        st.error("Please enter at least a few symptoms.")
     else:
         try:
             context = _build_context_section(
                 age_group, sex, duration, onset, fever, comorbid, meds, allergies, smoking, travel, pregnancy, noticed
             )
-
             with st.spinner("Querying DxGPT..."):
-                #st.image("https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif", caption="AI is thinking...", width='stretch')
                 result = get_top3_differentials_with_mismatch(symptoms_csv, context, optional_note)
-
 
             diags = result.get("diagnoses", [])
             if not diags:
                 st.warning("No results returned.")
             else:
-                # Summary table
                 st.subheader("Top differentials")
                 rows = [
                     {
@@ -274,28 +318,18 @@ if run_btn:
                     }
                     for d in diags
                 ]
-                st.dataframe(rows, width='stretch')
+                st.dataframe(rows, use_container_width=True)
 
-                # Details per diagnosis
                 for i, d in enumerate(diags, start=1):
                     with st.expander(f"{i}. {d['name']}"):
                         st.markdown(f"**Estimated probability:** {d.get('probability_percent', 0.0)}%")
                         matches = d.get("matching_symptoms") or []
                         not_typical = d.get("not_typical_symptoms") or []
 
-                        if matches:
-                            st.markdown("**Matching symptoms:** " + ", ".join(matches))
-                        else:
-                            st.markdown("**Matching symptoms:** none reported")
-
-                        if not_typical:
-                            st.markdown("**Your entered symptoms not typical for this illness:** " + ", ".join(not_typical))
-                        else:
-                            st.markdown("**Your entered symptoms not typical for this illness:** none reported")
-
+                        st.markdown("**Matching symptoms:** " + (", ".join(matches) if matches else "none reported"))
+                        st.markdown("**Your entered symptoms not typical for this illness:** " + (", ".join(not_typical) if not_typical else "none reported"))
                         st.markdown("**Rationale:** " + d.get("rationale", ""))
 
-                # Red flags and disclaimer
                 st.info("Red flags: " + result.get("red_flags", ""))
                 st.caption(result.get("disclaimer", ""))
 
@@ -303,7 +337,4 @@ if run_btn:
             st.error(str(ex))
             st.stop()
 
-# Footer note
 st.caption("This tool is not a substitute for a real Doctor.")
-#st.image("https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif", caption="Stay healthy!", width='stretch')
-#st.markdown("the above image wont be in final product, Compliments from Ludiac")

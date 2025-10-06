@@ -60,7 +60,7 @@ def call_dxgpt_diagnose(description: str) -> Any:
         "myuuid": str(uuid.uuid4()),
         "timezone": "Asia/Karachi",
         "lang": "en",
-        "model": "gpt4o",
+        "model": "o3",
         "response_mode": "direct"
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
