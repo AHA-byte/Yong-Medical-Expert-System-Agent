@@ -45,8 +45,3 @@ python OpenAI_Medical_Expert_System.py
 ## Security
 - **Never commit your `.env` file with real API keys to Git!**
 - Use environment variables to keep credentials safe.
-
-## License
-This project is licensed under the MIT License.
-
-
