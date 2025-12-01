@@ -10,7 +10,7 @@ import streamlit as st
 # --- Config ---
 from dotenv import load_dotenv
 load_dotenv()
-#using
+#using DxGpt
 DXGPT_SUBSCRIPTION_KEY = os.getenv("DXGPT_SUBSCRIPTION_KEY")
 DXGPT_BASE_URL = (os.getenv("DXGPT_BASE_URL") or "https://dxgpt-apim.azure-api.net/api").rstrip("/")
 
