@@ -255,7 +255,7 @@ def get_top3_differentials_with_mismatch(symptoms_csv: str, context: str, option
         "disclaimer": "This is not medical advice. Seek professional evaluation."
     }
 
-# --- Streamlit UI ---
+#streamlit
 
 st.set_page_config(page_title="Yong Differential Helper (Minimal)", page_icon="🩺", layout="centered")
 st.title("🩺 Yong Differential Helper (Minimal)")
